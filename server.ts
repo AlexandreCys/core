@@ -1,33 +1,52 @@
-import lodash = require('lodash');
-import *  as io from 'socket.io';
+import * as io from 'socket.io'
+import { get } from 'lodash'
+import Server from '../../common/server/abstract/server'
+import ServiceSocket from '../../common/socket/service.socket'
+import coreExeSocketController from './socketController/exe'
+import coreGetSocketController from './socketController/get'
+import coreSetSocketController from './socketController/set'
 
-const  socketController : { exe: Mto, get: Mto, set: Mto } = {
-  exe: require('./socketController/exe'),
-  get: require('./socketController/get'),
-  set: require('./socketController/set')
-};
+class CoreService extends Server {
 
-const services: Array<Socket> = new Array<Socket>();
+  public socketController = {
+    exe: new coreExeSocketController(),
+    get: new coreGetSocketController(),
+    set: new coreSetSocketController()
+  };
 
-const ServiceSocket = require('../../common/socket/service.socket');
+  constructor () {
+    super();
 
-io.sockets.on('connection', (socket : any) => {
-  let service : Socket = new ServiceSocket(socket.id, socket.handshake.query.type, socket);
+    this.io = io.listen(this.config.base.port);
 
-  console.log(`Service ${service.type} with id ${service.id} connected`);
-  services.push(service);
+    this.initSocket()
+  }
 
-  socket.on('action', (data : Mto) => {
-    return lodash.get(socketController, [data.type,data.action])(...data.args);
-  });
+  private initSocket (): void {
+    this.io.sockets.on('connection', (socket : any) : void => {
+      let serviceSocket : Socket = new ServiceSocket(socket.id, socket.handshake.query.type, socket);
+    
+      console.log(`Service ${serviceSocket.type} with id ${serviceSocket.id} connected`);
 
-  socket.on('disconnect', (cause : string) => {
-    let serviceIdx : number = services.findIndex((el : Socket) => { return el.id == socket.id });
-    let serviceItem : Socket = services[serviceIdx];
+      this.servicesTable.push(serviceSocket);
+    
+      socket.on('action', (data : Mto) : void => {
+        let method : Function = <Function>get(this.socketController, [data.type,data.action]);
 
-    console.log(`Service ${serviceItem.type} with id ${serviceItem.id} disconnected`);
-    services.splice(serviceIdx, 1);
-  });
-});
+        return method(...data.args);
+      });
+    
+      socket.on('disconnect', (cause : string) : void => {
+        let serviceIdx : number = this.servicesTable.findIndex((el : Socket) => { return el.id == socket.id });
+        let serviceItem : Socket = this.servicesTable[serviceIdx];
+    
+        console.log(`Service ${serviceItem.type} with id ${serviceItem.id} disconnected`);
 
-io.listen(Config.base.port);
+        this.servicesTable.splice(serviceIdx, 1);
+      });
+    });
+  }
+
+}
+
+export default new CoreService()
